@@ -110,6 +110,9 @@ class MqttClientHelper(object):
             self.client.on_log = self.on_log
 
     def connect(self):
+        if self.connected:
+            return
+
         try:
             if self.config.VERSION == '5':
                 self.client.connect(self.config.HOST,
@@ -124,6 +127,7 @@ class MqttClientHelper(object):
             print(f'mqtt: could not establish connection: {e}')
             return
 
+        self.connected = True
         self.client.loop_start()
 
     def stop(self):
@@ -132,13 +136,13 @@ class MqttClientHelper(object):
     # The MQTTv5 callback takes the additional 'props' parameter.
     def on_connect_v5(self, client, userdata, flags, rc, props):
         print("Connected: '" + str(flags) + "', '" + str(rc) + "', '" + str(props))
-        self.connected = True
-        self.client.subscribe(self.config.SUBSCRIBE_TOPIC, 2)
+        if rc == 0:
+            self.client.subscribe(self.config.SUBSCRIBE_TOPIC, int(self.config.SUBSCRIBE_QOS))
 
     def on_connect(self, client, userdata, flags, rc):
         print("Connected: '" + str(flags) + "', '" + str(rc))
-        self.connected = True
-        self.client.subscribe(self.config.SUBSCRIBE_TOPIC, 2)
+        if rc == 0:
+            self.client.subscribe(self.config.SUBSCRIBE_TOPIC, int(self.config.SUBSCRIBE_QOS))
 
     def on_message(self, client, userdata, msg):
         print(msg.topic + " " + str(msg.qos) + str(msg.payload))
@@ -448,8 +452,7 @@ class Application(object):
             self.mqtt_handler.publish(self.vehicle.data)
             self.last_timestamp = now
 
-        if not self.mqtt_handler.connected:
-            self.mqtt_handler.connect()
+        self.mqtt_handler.connect()
 
     def main_loop(self):
         self.mavlink.message_hooks.append(self.handle_msg)
