@@ -48,7 +48,7 @@ class Configuration(object):
                     _conf.read_file(open(_conf_file_path))
 
                     self.VERSION = str(_conf.get('general', 'version'))
-                    self.CLIENT_ID = str(_conf.get('general', 'client_id'))
+                    self.CLIENT_ID = str(_conf.get('general', 'clientid'))
                     self.HOST = str(_conf.get('general', 'host'))
                     self.PORT = _conf.get('general', 'port')
                     self.TRANSPORT = str(_conf.get('general', 'transport'))
@@ -56,13 +56,15 @@ class Configuration(object):
                     self.PASSWORD = str(_conf.get('general', 'password'))
                     self.KEEPALIVE = str(_conf.get('general', 'keepalive'))
 
-                    self.VID = str(_conf.get('device', 'vid'))
-                    self.PID = str(_conf.get('device', 'pid'))
+                    self.VENDOR_ID = str(_conf.get('device', 'vendorid'))
+                    self.VENDOR_NAME = str(_conf.get('device', 'vendorname'))
+                    self.SERIAL_NUM = str(_conf.get('device', 'serialnum'))
+                    self.FLIGHT_TYPE = str(_conf.get('device', 'flighttype'))
 
                     self.PUBLISH_TOPIC = str(_conf.get('publish', 'topic'))
                     self.PUBLISH_QOS = _conf.get('publish', 'qos')
-                    self.SUBSCRIBE_TOPIC = str(_conf.get('subscribe', 'topic'))
-                    self.SUBSCRIBE_QOS = _conf.get('subscribe', 'qos')
+                    #self.SUBSCRIBE_TOPIC = str(_conf.get('subscribe', 'topic'))
+                    #self.SUBSCRIBE_QOS = _conf.get('subscribe', 'qos')
 
                     self.APP_DEBUG = parse_bool(_conf.get('debug', 'app_debug'))
                     self.MODULE_DEBUG = parse_bool(_conf.get('debug', 'module_debug'))
@@ -137,12 +139,14 @@ class MqttClientHelper(object):
     def on_connect_v5(self, client, userdata, flags, rc, props):
         print("Connected: '" + str(flags) + "', '" + str(rc) + "', '" + str(props))
         if rc == 0:
-            self.client.subscribe(self.config.SUBSCRIBE_TOPIC, int(self.config.SUBSCRIBE_QOS))
+            #self.client.subscribe(self.config.SUBSCRIBE_TOPIC, int(self.config.SUBSCRIBE_QOS))
+            pass
 
     def on_connect(self, client, userdata, flags, rc):
         print("Connected: '" + str(flags) + "', '" + str(rc))
         if rc == 0:
-            self.client.subscribe(self.config.SUBSCRIBE_TOPIC, int(self.config.SUBSCRIBE_QOS))
+            if self.config.SUBSCRIBE_TOPIC is not None:
+                self.client.subscribe(self.config.SUBSCRIBE_TOPIC, int(self.config.SUBSCRIBE_QOS))
 
     def on_message(self, client, userdata, msg):
         print(msg.topic + " " + str(msg.qos) + str(msg.payload))
@@ -150,12 +154,9 @@ class MqttClientHelper(object):
     def on_log(self, client, userdata, level, message):
         print(message)
 
-    def send_message(self, data):
+    def publish(self, data):
         print(json.dumps(data))
         self.client.publish(self.config.PUBLISH_TOPIC, json.dumps(data), int(self.config.PUBLISH_QOS))
-
-    def publish(self, data):
-        self.send_message({'MessageType': 'message', 'Cmd': 'drone_realdata', 'DroneSerialNo': self.config.PID, 'Data': data})
 
 
 #
@@ -226,6 +227,264 @@ def interpret_px4_mode(base_mode, custom_mode):
     return "UNKNOWN"
 
 
+class FactGroup(object):
+    def __init__(self, name):
+        self.name = name 
+        self.dict = dict()
+
+    def set(self, key, value):
+        self.dict[key] = value
+
+    def get(self, key):
+        return self.dict.get(key)
+
+    def set_default(self, key, value=None):
+        if key in self.dict.keys():
+            self.dict.setdefault(key, value)
+
+    def is_valid(self):
+        if bool(self.dict):
+            return True
+        else:
+            return False
+
+    def value(self):
+        if self.is_valid():
+            if self.name is not None:
+                return dict({self.name : self.dict})
+            else:
+                return self.dict
+
+        return dict()
+
+
+    def handle_message(self, conn, msg):
+        pass
+
+    def load_from_json(self, file):
+        # TODO
+        pass
+
+
+class HomePositionFactGroup(FactGroup):
+    LatFactName = 'homeLatitude'
+    LonFactName = 'homeLongitude'
+    AltFactName = 'homeAltitude'
+
+    def __init__(self):
+        super(HomePositionFactGroup, self).__init__(None)
+        self.set_default(HomePositionFactGroup.LatFactName)
+        self.set_default(HomePositionFactGroup.LonFactName)
+        self.set_default(HomePositionFactGroup.AltFactName)
+
+    def is_valid(self):
+        if self.get(HomePositionFactGroup.LatFactName) is not None:
+            return True
+        else:
+            return False
+
+    def handle_message(self, conn, msg):
+        type = msg.get_type()
+
+        if type == 'HOME_POSITION':
+            self.handle_home_position(conn, msg)
+        else:
+            return False
+
+        return True
+
+    def handle_home_position(self, conn, msg):
+        self.set(HomePositionFactGroup.LatFactName, msg.latitude / 1.0e7)
+        self.set(HomePositionFactGroup.LonFactName, msg.longitude / 1.0e7)
+        self.set(HomePositionFactGroup.AltFactName, msg.altitude / 1000.0)
+
+
+class GPSFactGroup(FactGroup):
+    LatFactName = 'Latitude'
+    LonFactName = 'Longitude'
+    AltFactName = 'Altitude'
+    SatFactName = 'Satellite'
+
+    def __init__(self):
+        super(GPSFactGroup, self).__init__('GPSData')
+        self.set_default(GPSFactGroup.LatFactName)
+        self.set_default(GPSFactGroup.LonFactName)
+        self.set_default(GPSFactGroup.AltFactName)
+        self.set_default(GPSFactGroup.SatFactName)
+
+    def is_valid(self):
+        if self.get(GPSFactGroup.LatFactName) is not None:
+            return True
+        else:
+            return False
+
+    def handle_message(self, conn, msg):
+        type = msg.get_type()
+
+        if type == 'GPS_RAW_INT':
+            self.handle_gps_raw_int(conn, msg)
+        elif type == 'HIGH_LATENCY':
+            self.handle_high_latency(conn, msg)
+        elif type == 'HIGH_LATENCY2':
+            self.handle_high_latency2(conn, msg)
+        else:
+            return False
+
+        return True
+
+    def handle_gps_raw_int(self, conn, msg):
+        self.set(GPSFactGroup.LatFactName, msg.lat / 1.0e7)
+        self.set(GPSFactGroup.LonFactName, msg.lon / 1.0e7)
+        self.set(GPSFactGroup.AltFactName, msg.alt / 1000.0)
+        self.set(GPSFactGroup.SatFactName, msg.satellites_visible)
+
+    def handle_high_latency(self, conn, msg):
+        pass
+
+    def handle_high_latency2(self, conn, msg):
+        pass
+
+
+class RTKFactGroup(FactGroup):
+    def __init__(self):
+        super(RTKFactGroup, self).__init__('RTKData')
+
+    def handle_message(self, conn, msg):
+        return False
+
+
+class AttitudeFactGroup(FactGroup):
+    PitchFactName = 'Pitch'
+    RollFactName  = 'Roll'
+    YawFactName   = 'Yaw'
+
+    def __init__(self):
+        super(AttitudeFactGroup, self).__init__('AttitudeAngle')
+        self.set_default(AttitudeFactGroup.PitchFactName)
+        self.set_default(AttitudeFactGroup.RollFactName)
+        self.set_default(AttitudeFactGroup.YawFactName)
+
+    def is_valid(self):
+        if self.get(AttitudeFactGroup.PitchFactName) is not None:
+            return True
+        else:
+            return False
+
+    def handle_message(self, conn, msg):
+        type = msg.get_type()
+
+        if type == 'ATTITUDE':
+            self.handle_attitude(conn, msg)
+        else:
+            return False
+
+        return True
+
+    def handle_attitude(self, conn, msg):
+        self.set(AttitudeFactGroup.PitchFactName, msg.pitch)
+        self.set(AttitudeFactGroup.RollFactName, msg.roll)
+        self.set(AttitudeFactGroup.YawFactName, msg.yaw)
+
+
+class BatteryFactGroup(FactGroup):
+    PercentRemainingFactName = 'BatteryPercent'
+    VoltageFactName = 'BatteryVoltage'
+
+    def __init__(self):
+        super(BatteryFactGroup, self).__init__(None)
+        self.set_default(BatteryFactGroup.PercentRemainingFactName)
+        self.set_default(BatteryFactGroup.VoltageFactName)
+
+    def is_valid(self):
+        if self.get(BatteryFactGroup.PercentRemainingFactName) is not None:
+            return True
+        else:
+            return False
+
+    def handle_message(self, conn, msg):
+        type = msg.get_type()
+
+        if type == 'SYS_STATUS':
+            self.handle_sys_status(conn, msg)
+
+        return False
+
+    def handle_sys_status(self, conn, msg):
+        self.set(BatteryFactGroup.PercentRemainingFactName, msg.battery_remaining)
+        self.set(BatteryFactGroup.VoltageFactName, msg.voltage_battery / 1000.0)
+
+    def handle_battery_status(self, conn, msg):
+        pass
+
+
+class VehicleFactGroup(FactGroup):
+    LatFactName = 'Latitude'
+    LonFactName = 'Longitude'
+    AltFactName = 'Altitude'
+    GPSFactName = 'GPSLevel'
+    SPXFactName = 'SpeedX'
+    SPYFactName = 'SpeedY'
+    SPZFactName = 'SpeedZ'
+    TimeFactName = 'Timestamp'
+    LandFactName = 'LandMode'
+    StatusFactName = 'DroneStatus'
+    SNFactName = 'DroneSerialNo'
+    FlightTypeFactName = 'FlightType'
+
+    def __init__(self):
+        super(VehicleFactGroup, self).__init__(None)
+        self.set_default(VehicleFactGroup.LatFactName)
+        self.set_default(VehicleFactGroup.LonFactName)
+        self.set_default(VehicleFactGroup.AltFactName)
+        self.set_default(VehicleFactGroup.GPSFactName)
+        self.set_default(VehicleFactGroup.SPXFactName)
+        self.set_default(VehicleFactGroup.SPYFactName)
+        self.set_default(VehicleFactGroup.SPZFactName)
+        self.set_default(VehicleFactGroup.LandFactName)
+        self.set_default(VehicleFactGroup.StatusFactName)
+        self.set_default(VehicleFactGroup.TimeFactName)
+        self.set_default(VehicleFactGroup.SNFactName)
+        self.set_default(VehicleFactGroup.FlightTypeFactName)
+
+    def set_status(self, status):
+        self.set(VehicleFactGroup.StatusFactName, status)
+
+    def set_land_mode(self, mode):
+        self.set(VehicleFactGroup.LandFactName, mode)
+
+    def set_flight_type(self, flightType):
+        self.set(VehicleFactGroup.FlightTypeFactName, flightType)
+
+    def set_serial_num(self, serialNum):
+        self.set(VehicleFactGroup.SNFactName, serialNum)
+
+    def is_valid(self):
+        if self.get(VehicleFactGroup.TimeFactName) is not None:
+            return True
+        else:
+            return False
+
+    def handle_message(self, conn, msg):
+        type = msg.get_type()
+
+        self.set(VehicleFactGroup.TimeFactName, int(conn.timestamp))
+
+        if type == 'GLOBAL_POSITION_INT':
+            self.handle_global_position_int(conn, msg)
+        else:
+            return False
+
+        return True
+
+    def handle_global_position_int(self, conn, msg):
+        self.set(VehicleFactGroup.LatFactName, msg.lat / 1.0e7)
+        self.set(VehicleFactGroup.LonFactName, msg.lon / 1.0e7)
+        self.set(VehicleFactGroup.AltFactName, msg.alt / 1000.0)
+        self.set(VehicleFactGroup.SPXFactName, msg.vx)
+        self.set(VehicleFactGroup.SPYFactName, msg.vy)
+        self.set(VehicleFactGroup.SPZFactName, msg.vz)
+
+
 class Vehicle(object):
     def __init__(self, sysid, compid):
         self.system = sysid
@@ -234,102 +493,21 @@ class Vehicle(object):
         self.ready = False
         self.armed = False
         self.landed_state = -1
+        self.vehicleFactGroup = VehicleFactGroup()
 
-        self.data = {}
-        self.data['Timestamp'] = 0
-        self.data['DroneMode'] = 'GPS' #
-        self.data['LandMode'] = -1
-        self.data['DroneStatus'] = 'Unknown'
-        self.data['BatteryVoltage'] = 0.0
-        self.data['BatteryPercent'] = 0
-        self.data['GPSLevel'] = 0
-        self.data['Longitude'] = 0.0
-        self.data['Latitude'] = 0.0
-        self.data['Altitude'] = 0.0
-        self.data['SpeedX'] = 0
-        self.data['SpeedY'] = 0
-        self.data['SpeedZ'] = 0
-        self.data['GPSData'] = {'Longitude': 0.0, 'Latitude': 0.0, 'Altitude': 0.0, 'Satellite': 0}
-        self.data['RTKData'] = {'Longitude': 0.0, 'Latitude': 0.0, 'Altitude': 0.0, 'Satellite': 0, 'Status': 0}
-        self.data['AttitudeAngle'] = {'Roll': 0.0, 'Pitch': 0.0, 'Yaw': 0.0 }
+        self.fact_groups = []
+        self.fact_groups.append(GPSFactGroup())
+        self.fact_groups.append(HomePositionFactGroup())
+        self.fact_groups.append(RTKFactGroup())
+        self.fact_groups.append(AttitudeFactGroup())
+        self.fact_groups.append(BatteryFactGroup())
+        self.fact_groups.append(self.vehicleFactGroup)
 
-    def handle_heartbeat(self, conn, msg):
-        self.armed = msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_DECODE_POSITION_SAFETY == mavutil.mavlink.MAV_MODE_FLAG_DECODE_POSITION_SAFETY
-        if self.armed:
-            if self.landed_state == mavutil.mavlink.MAV_LANDED_STATE_TAKEOFF:
-                self.data['DroneStatus'] = 'Takeoff'
-            elif self.landed_state == mavutil.mavlink.MAV_LANDED_STATE_LANDING:
-                self.data['DroneStatus'] = 'Landing'
-            elif self.landed_state == mavutil.mavlink.MAV_LANDED_STATE_IN_AIR:
-                if msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED == mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED:
-                    # TODO: handle PX4 custom mode
-                    self.data['DroneStatus'] = interpret_px4_mode(msg.base_mode, msg.custom_mode) #'Custom:0x%x' % msg.custom_mode
-                elif msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_MANUAL_INPUT_ENABLED == mavutil.mavlink.MAV_MODE_FLAG_MANUAL_INPUT_ENABLED:
-                    self.data['DroneStatus'] = 'Manual'
-                elif msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_STABILIZE_ENABLED == mavutil.mavlink.MAV_MODE_FLAG_STABILIZE_ENABLED:
-                    self.data['DroneStatus'] = 'Stabilize'
-                elif msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_GUIDED_ENABLED == mavutil.mavlink.MAV_MODE_FLAG_GUIDED_ENABLED:
-                    self.data['DroneStatus'] = 'Guide'
-                elif msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_AUTO_ENABLED == mavutil.mavlink.MAV_MODE_FLAG_AUTO_ENABLED:
-                    self.data['DroneStatus'] = 'Auto'
-                elif msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_TEST_ENABLED == mavutil.mavlink.MAV_MODE_FLAG_TEST_ENABLED:
-                    self.data['DroneStatus'] = 'Test'
-                else:
-                    self.data['DroneStatus'] = 'Unknown'
-            else:
-                self.data['DroneStatus'] = 'Ready'
-        elif self.ready:
-            self.data['DroneStatus'] = 'Ready'
-        else:
-            self.data['DroneStatus'] = 'Unknown'
+    def set_flight_type(self, flightType):
+        self.vehicleFactGroup.set_flight_type(flightType)
 
-    def handle_sys_status(self, conn, msg):
-        if msg.onboard_control_sensors_health & mavutil.mavlink.MAV_SYS_STATUS_PREARM_CHECK == mavutil.mavlink.MAV_SYS_STATUS_PREARM_CHECK:
-            self.ready = True
-        else:
-            self.ready = False
-
-        self.data['BatteryVoltage'] = msg.voltage_battery
-        self.data['BatteryPercent'] = msg.battery_remaining
-
-    def handle_extended_sys_state(self, conn, msg):
-        self.landed_state = msg.landed_state
-
-        if self.landed_state == mavutil.mavlink.MAV_LANDED_STATE_UNDEFINED:
-            self.data['LandMode'] = -1
-        elif self.landed_state == mavutil.mavlink.MAV_LANDED_STATE_ON_GROUND:
-            self.data['LandMode'] = 0
-        else:
-            # IN_AIR
-            self.data['LandMode'] = 1
-
-    def handle_global_position_int(self, conn, msg):
-        self.data['Longitude'] = msg.lon / 1.0e7
-        self.data['Latitude'] = msg.lat / 1.0e7
-        self.data['Altitude'] = msg.alt / 1000.0
-        self.data['SpeedX'] = msg.vx
-        self.data['SpeedY'] = msg.vy
-        self.data['SpeedZ'] = msg.vz
-
-    def handle_attitude(self, conn, msg):
-        self.data['AttitudeAngle']['roll'] = msg.roll
-        self.data['AttitudeAngle']['yaw'] = msg.yaw
-        self.data['AttitudeAngle']['pitch'] = msg.pitch
-
-    def handle_battery_status(self, conn, msg):
-        pass
-
-    def handle_gps_raw_int(self, conn, msg):
-        self.data['GPSLevel'] = msg.satellites_visible
-        self.data['GPSData']['Longitude'] = msg.lon / 1.0e7
-        self.data['GPSData']['Latitude'] = msg.lat / 1.0e7
-        self.data['GPSData']['Altitude'] = msg.alt / 1000.0
-        self.data['GPSData']['Satellite'] = msg.satellites_visible
-        self.data['RTKData']['Longitude'] = msg.lon / 1.0e7
-        self.data['RTKData']['Latitude'] = msg.lat / 1.0e7
-        self.data['RTKData']['Altitude'] = msg.alt / 1000.0
-        self.data['RTKData']['Satellite'] = msg.satellites_visible
-        self.data['RTKData']['Status'] = msg.fix_type
+    def set_serial_num(self, serialNum):
+        self.vehicleFactGroup.set_serial_num(serialNum)
 
     def handle_msg(self, conn, msg):
         type = msg.get_type()
@@ -342,30 +520,82 @@ class Vehicle(object):
         if self.component != 0 and self.component != compid:
             return False
 
-        self.data['Timestamp'] = int(conn.timestamp)
+        for group in self.fact_groups:
+            if group.handle_message(conn, msg):
+                return True
 
         if type == 'HEARTBEAT':
             self.handle_heartbeat(conn, msg)
-        elif type == 'ATTITUDE':
-            self.handle_attitude(conn, msg)
         elif type == 'EXTENDED_SYS_STATE':
             self.handle_extended_sys_state(conn, msg)
         elif type == 'SYS_STATUS':
             self.handle_sys_status(conn, msg)
-        elif type == 'BATTERY_STATUS':
-            self.handle_battery_status(conn, msg)
-        elif type == 'GLOBAL_POSITION_INT':
-            self.handle_global_position_int(conn, msg)
-        elif type == 'GPS_RAW_INT':
-            self.handle_gps_raw_int(conn, msg)
         else:
-            # message type not handleded 
-            pass
+            return False
 
         return True
 
+    def handle_heartbeat(self, conn, msg):
+        self.armed = msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_DECODE_POSITION_SAFETY == mavutil.mavlink.MAV_MODE_FLAG_DECODE_POSITION_SAFETY
+        if self.armed:
+            if self.landed_state == mavutil.mavlink.MAV_LANDED_STATE_TAKEOFF:
+                status = 'Takeoff'
+            elif self.landed_state == mavutil.mavlink.MAV_LANDED_STATE_LANDING:
+                status = 'Landing'
+            elif self.landed_state == mavutil.mavlink.MAV_LANDED_STATE_IN_AIR:
+                if msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED == mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED:
+                    # TODO: handle PX4 custom mode
+                    status = interpret_px4_mode(msg.base_mode, msg.custom_mode) #'Custom:0x%x' % msg.custom_mode
+                elif msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_MANUAL_INPUT_ENABLED == mavutil.mavlink.MAV_MODE_FLAG_MANUAL_INPUT_ENABLED:
+                    status = 'Manual'
+                elif msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_STABILIZE_ENABLED == mavutil.mavlink.MAV_MODE_FLAG_STABILIZE_ENABLED:
+                    status = 'Stablize'
+                elif msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_GUIDED_ENABLED == mavutil.mavlink.MAV_MODE_FLAG_GUIDED_ENABLED:
+                    status = 'Guide'
+                elif msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_AUTO_ENABLED == mavutil.mavlink.MAV_MODE_FLAG_AUTO_ENABLED:
+                    status = 'Auto'
+                elif msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_TEST_ENABLED == mavutil.mavlink.MAV_MODE_FLAG_TEST_ENABLED:
+                    status = 'Test'
+                else:
+                    status = 'Unknown'
+            else:
+                status = 'Ready'
+        elif self.ready:
+            status = 'Ready'
+        else:
+            status = 'Unknown'
+
+        self.vehicleFactGroup.set_status(status)
+
+    def handle_sys_status(self, conn, msg):
+        if msg.onboard_control_sensors_health & mavutil.mavlink.MAV_SYS_STATUS_PREARM_CHECK == mavutil.mavlink.MAV_SYS_STATUS_PREARM_CHECK:
+            self.ready = True
+        else:
+            self.ready = False
+
+    def handle_extended_sys_state(self, conn, msg):
+        self.landed_state = msg.landed_state
+
+        if self.landed_state == mavutil.mavlink.MAV_LANDED_STATE_UNDEFINED:
+            landMode = -1
+        elif self.landed_state == mavutil.mavlink.MAV_LANDED_STATE_ON_GROUND:
+            landMode = 0
+        else:
+            # IN_AIR
+            landMode = 1
+
+        self.vehicleFactGroup.set_land_mode(landMode)
+
+    def telemetry(self):
+        data = dict({'Topic': 'TRACK'})
+        for group in self.fact_groups:
+            data = data | group.value()
+
+        return data
+
     def update(self):
         pass
+
 
 class Application(object):
     def __init__(self, optsargs):
@@ -375,6 +605,8 @@ class Application(object):
         pprint.pprint(vars(self.config))
 
         self.vehicle = Vehicle(self.opts.target_system, self.opts.target_component)
+        self.vehicle.set_flight_type(self.config.FLIGHT_TYPE)
+        self.vehicle.set_serial_num(self.config.SERIAL_NUM)
         self.stream_rate = self.opts.stream_rate
         self.last_timestamp = time.monotonic()
 
@@ -449,7 +681,7 @@ class Application(object):
         now = time.monotonic()
         if now - self.last_timestamp > 1.0 / self.stream_rate:
             self.vehicle.update()
-            self.mqtt_handler.publish(self.vehicle.data)
+            self.mqtt_handler.publish(self.vehicle.telemetry())
             self.last_timestamp = now
 
         self.mqtt_handler.connect()
