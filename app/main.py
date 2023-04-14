@@ -117,12 +117,12 @@ class MqttClientHelper(object):
 
         try:
             if self.config.VERSION == '5':
-                self.client.connect(self.config.HOST,
+                self.client.connect_async(self.config.HOST,
                                     port=int(self.config.PORT),
                                     clean_start=mqtt.MQTT_CLEAN_START_FIRST_ONLY,
                                     keepalive=int(self.config.KEEPALIVE))
             else:
-                self.client.connect(self.config.HOST,
+                self.client.connect_async(self.config.HOST,
                                     port=int(self.config.PORT),
                                     keepalive=int(self.config.KEEPALIVE))
         except Exception as e:
@@ -137,25 +137,30 @@ class MqttClientHelper(object):
 
     # The MQTTv5 callback takes the additional 'props' parameter.
     def on_connect_v5(self, client, userdata, flags, rc, props):
-        print("Connected: '" + str(flags) + "', '" + str(rc) + "', '" + str(props))
+        if self.config.APP_DEBUG:
+            print("Connected: '" + str(flags) + "', '" + str(rc) + "', '" + str(props))
         if rc == 0:
-            #self.client.subscribe(self.config.SUBSCRIBE_TOPIC, int(self.config.SUBSCRIBE_QOS))
+            if self.config.SUBSCRIBE_TOPIC is not None:
+                self.client.subscribe(self.config.SUBSCRIBE_TOPIC, int(self.config.SUBSCRIBE_QOS))
             pass
 
     def on_connect(self, client, userdata, flags, rc):
-        print("Connected: '" + str(flags) + "', '" + str(rc))
+        if self.config.APP_DEBUG:
+            print("Connected: '" + str(flags) + "', '" + str(rc))
         if rc == 0:
             if self.config.SUBSCRIBE_TOPIC is not None:
                 self.client.subscribe(self.config.SUBSCRIBE_TOPIC, int(self.config.SUBSCRIBE_QOS))
 
     def on_message(self, client, userdata, msg):
-        print(msg.topic + " " + str(msg.qos) + str(msg.payload))
+        if self.config.APP_DEBUG:
+            print(msg.topic + " " + str(msg.qos) + str(msg.payload))
 
     def on_log(self, client, userdata, level, message):
         print(message)
 
     def publish(self, data):
-        print(json.dumps(data))
+        if self.config.APP_DEBUG:
+            print(json.dumps(data))
         self.client.publish(self.config.PUBLISH_TOPIC, json.dumps(data), int(self.config.PUBLISH_QOS))
 
 
@@ -230,17 +235,17 @@ def interpret_px4_mode(base_mode, custom_mode):
 class FactGroup(object):
     def __init__(self, name):
         self.name = name 
-        self.dict = dict()
+        self.dict = {}
 
     def set(self, key, value):
-        self.dict[key] = value
+        if key in self.dict.keys():
+            self.dict[key] = value
 
     def get(self, key):
         return self.dict.get(key)
 
     def set_default(self, key, value=None):
-        if key in self.dict.keys():
-            self.dict.setdefault(key, value)
+        self.dict.setdefault(key, value)
 
     def is_valid(self):
         if bool(self.dict):
@@ -250,12 +255,14 @@ class FactGroup(object):
 
     def value(self):
         if self.is_valid():
-            if self.name is not None:
-                return dict({self.name : self.dict})
-            else:
-                return self.dict
+            res = { key : val for key, val in self.dict.items() if val is not None }
 
-        return dict()
+            if self.name is not None:
+                return {self.name : res}
+            else:
+                return res
+
+        return {}
 
 
     def handle_message(self, conn, msg):
@@ -417,6 +424,17 @@ class BatteryFactGroup(FactGroup):
         pass
 
 
+class TrackInfoFactGroup(FactGroup):
+    TopicFactName = 'Topic'
+    DroneSerialNoFactName = 'DroneSerialNo'
+    FlightTypeFactName = 'FlightType'
+
+    def __init__(self, serialNum, flightType):
+        super(TrackInfoFactGroup, self).__init__(None)
+        self.set_default(TrackInfoFactGroup.TopicFactName, 'TRACK')
+        self.set_default(TrackInfoFactGroup.DroneSerialNoFactName, serialNum)
+        self.set_default(TrackInfoFactGroup.FlightTypeFactName, flightType)
+
 class VehicleFactGroup(FactGroup):
     LatFactName = 'Latitude'
     LonFactName = 'Longitude'
@@ -428,8 +446,6 @@ class VehicleFactGroup(FactGroup):
     TimeFactName = 'Timestamp'
     LandFactName = 'LandMode'
     StatusFactName = 'DroneStatus'
-    SNFactName = 'DroneSerialNo'
-    FlightTypeFactName = 'FlightType'
 
     def __init__(self):
         super(VehicleFactGroup, self).__init__(None)
@@ -443,20 +459,12 @@ class VehicleFactGroup(FactGroup):
         self.set_default(VehicleFactGroup.LandFactName)
         self.set_default(VehicleFactGroup.StatusFactName)
         self.set_default(VehicleFactGroup.TimeFactName)
-        self.set_default(VehicleFactGroup.SNFactName)
-        self.set_default(VehicleFactGroup.FlightTypeFactName)
 
     def set_status(self, status):
         self.set(VehicleFactGroup.StatusFactName, status)
 
     def set_land_mode(self, mode):
         self.set(VehicleFactGroup.LandFactName, mode)
-
-    def set_flight_type(self, flightType):
-        self.set(VehicleFactGroup.FlightTypeFactName, flightType)
-
-    def set_serial_num(self, serialNum):
-        self.set(VehicleFactGroup.SNFactName, serialNum)
 
     def is_valid(self):
         if self.get(VehicleFactGroup.TimeFactName) is not None:
@@ -486,7 +494,7 @@ class VehicleFactGroup(FactGroup):
 
 
 class Vehicle(object):
-    def __init__(self, sysid, compid):
+    def __init__(self, sysid, compid, serialNum, FlightType):
         self.system = sysid
         self.component = compid
 
@@ -496,18 +504,13 @@ class Vehicle(object):
         self.vehicleFactGroup = VehicleFactGroup()
 
         self.fact_groups = []
+        self.fact_groups.append(TrackInfoFactGroup(serialNum, FlightType))
         self.fact_groups.append(GPSFactGroup())
         self.fact_groups.append(HomePositionFactGroup())
         self.fact_groups.append(RTKFactGroup())
         self.fact_groups.append(AttitudeFactGroup())
         self.fact_groups.append(BatteryFactGroup())
         self.fact_groups.append(self.vehicleFactGroup)
-
-    def set_flight_type(self, flightType):
-        self.vehicleFactGroup.set_flight_type(flightType)
-
-    def set_serial_num(self, serialNum):
-        self.vehicleFactGroup.set_serial_num(serialNum)
 
     def handle_msg(self, conn, msg):
         type = msg.get_type()
@@ -587,7 +590,7 @@ class Vehicle(object):
         self.vehicleFactGroup.set_land_mode(landMode)
 
     def telemetry(self):
-        data = dict({'Topic': 'TRACK'})
+        data = {}
         for group in self.fact_groups:
             data = data | group.value()
 
@@ -602,11 +605,10 @@ class Application(object):
         (self.opts, self.args) = optsargs
 
         self.config = Configuration(self.opts.configuration)
-        pprint.pprint(vars(self.config))
+        if self.config.APP_DEBUG:
+            pprint.pprint(vars(self.config))
 
-        self.vehicle = Vehicle(self.opts.target_system, self.opts.target_component)
-        self.vehicle.set_flight_type(self.config.FLIGHT_TYPE)
-        self.vehicle.set_serial_num(self.config.SERIAL_NUM)
+        self.vehicle = Vehicle(self.opts.target_system, self.opts.target_component, self.config.SERIAL_NUM, self.config.FLIGHT_TYPE)
         self.stream_rate = self.opts.stream_rate
         self.last_timestamp = time.monotonic()
 
@@ -618,7 +620,8 @@ class Application(object):
         # create MAVLink link
         try:
             self.mavlink = mavutil.mavlink_connection(self.opts.connection)
-            print("MAVLINK %s" % (self.opts.connection))
+            if self.config.APP_DEBUG:
+                print("MAVLINK %s" % (self.opts.connection))
         except Exception as err:
             print("Failed to connect to %s: %s" % (self.opts.connection, err))
             sys.exit(1)
