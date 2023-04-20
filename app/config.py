@@ -65,6 +65,11 @@ class Configuration(object):
                     self.APP_DEBUG = parse_bool(_conf.get('debug', 'app_debug'))
                     self.MODULE_DEBUG = parse_bool(_conf.get('debug', 'module_debug'))
 
+                    if _conf.has_option('mavlink', 'connection'):
+                        self.MAVLINK_CONNECTION = str(_conf.get('mavlink', 'connection'))
+                    else:
+                        self.MAVLINK_CONNECTION = None
+
                     if self.MODULE_DEBUG:
                         print('Using config file at {}'.format(_conf_file_path))
 
