@@ -1,4 +1,4 @@
-import sys, os, signal, queue, select, time, json, math, requests
+import sys, os, signal, queue, select, time, json, math
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pymavlink import mavutil
@@ -105,7 +105,7 @@ class FactGroup(object):
 
 
     def handle_message(self, conn, msg):
-        pass
+        return False
 
     def load_from_json(self, file):
         # TODO
@@ -333,7 +333,7 @@ class VehicleFactGroup(FactGroup):
 
 
 class Vehicle(object):
-    def __init__(self, sysid, compid, serialNum, FlightType):
+    def __init__(self, sysid, compid, serialNum, flightType):
         self.system = sysid
         self.component = compid
 
@@ -345,7 +345,7 @@ class Vehicle(object):
 
         self.vehicleFactGroup = VehicleFactGroup()
         self.fact_groups = []
-        self.fact_groups.append(TrackInfoFactGroup(serialNum, FlightType))
+        self.fact_groups.append(TrackInfoFactGroup(serialNum, flightType))
         self.fact_groups.append(GPSFactGroup())
         self.fact_groups.append(HomePositionFactGroup())
         self.fact_groups.append(RTKFactGroup())
@@ -358,20 +358,19 @@ class Vehicle(object):
         sysid = msg.get_srcSystem()
         compid = msg.get_srcComponent()
 
-        if self.system != 0 and self.system == sysid:
-            if self.component != 0 and self.component == compid:
-                for group in self.fact_groups:
-                    if group.handle_message(conn, msg):
-                        return True
+        if self.system == 0 or self.system == sysid:
+            if self.component == 0 or self.component == compid:
+                if self.handle_message_in_groups(conn, msg):
+                    return True
 
-                    if type == 'HEARTBEAT':
-                        self.handle_heartbeat(conn, msg)
-                    elif type == 'EXTENDED_SYS_STATE':
-                        self.handle_extended_sys_state(conn, msg)
-                    elif type == 'SYS_STATUS':
-                        self.handle_sys_status(conn, msg)
-                    else:
-                        return False
+                if type == 'HEARTBEAT':
+                    self.handle_heartbeat(conn, msg)
+                elif type == 'EXTENDED_SYS_STATE':
+                    self.handle_extended_sys_state(conn, msg)
+                elif type == 'SYS_STATUS':
+                    self.handle_sys_status(conn, msg)
+                else:
+                    return False
             elif self.component >= mavutil.mavlink.MAV_COMP_ID_CAMERA and self.component <= mavutil.mavlink.MAV_COMP_ID_CAMERA6:
                 # FIXME: Should be done in the CameraManager class
                 if type == 'CAMERA_IMAGE_CAPTURED':
@@ -380,6 +379,12 @@ class Vehicle(object):
                     return False
 
         return True
+
+    def handle_message_in_groups(self, conn, msg):
+        for grp in self.fact_groups:
+            if grp.handle_message(conn, msg):
+                return True
+        return False
 
     def handle_heartbeat(self, conn, msg):
         self.armed = msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_DECODE_POSITION_SAFETY == mavutil.mavlink.MAV_MODE_FLAG_DECODE_POSITION_SAFETY
@@ -458,7 +463,7 @@ class Vehicle(object):
     def telemetry(self):
         data = {}
         for group in self.fact_groups:
-            data = data | group.value()
+            data |= group.value()
 
         return data
 
