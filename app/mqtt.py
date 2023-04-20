@@ -75,18 +75,8 @@ class MqttHandler(object):
         if self.config.APP_DEBUG:
             print(msg.topic + " " + str(msg.qos) + str(msg.payload))
         message = json.loads(msg.payload)
-        uav_serial_num = message.get('UAVSerialNum')
-        if uav_serial_num == self.config.SERIAL_NUM:
-            handle_ufly_message(message)
-
-    def handle_ufly_message(self, message):
-        type = message.get('Type')
-        streamUrl = message.get('StreamUrl')
-        if type is not None and streamUrl is not None:
-            if type == 1:
-                pass
-            else:
-                pass
+        if self.callback is not None:
+            self.callback(message)
 
     def on_log(self, client, userdata, level, message):
         print(message)

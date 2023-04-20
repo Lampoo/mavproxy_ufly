@@ -86,7 +86,7 @@ class VideotestPipeline(GSTPipeline):
         if pattern is None or pattern == '':
             pattern = 'smpte'
         self.pipeline = Gst.parse_launch(
-            'videotestsrc pattern={} name=source ! tee name=t ! x264enc tune=zerolatency rc-lookahead=5 ! flvmux streamable=true ! rtmpsink sync=false live=1 name=sink'.format(pattern)
+            'videotestsrc pattern={} name=source is-live=true ! tee name=t ! x264enc tune=zerolatency rc-lookahead=5 ! flvmux streamable=true ! rtmpsink sync=false name=sink'.format(pattern)
         )
 
 
@@ -94,7 +94,7 @@ class RTSPPipeline(GSTPipeline):
     def __init__(self, uri):
         super(RTSPPipeline, self).__init__()
         self.pipeline = Gst.parse_launch(
-            'rtspsrc name=source location={} latency=0 udp-reconnect=1 timeout=5000000 ! rtph264depay ! flvmux streamable=true ! rtmpsink sync=false live=1 name=sink'.format(uri)
+            'rtspsrc name=source location={} latency=0 udp-reconnect=1 timeout=5000000 ! rtph264depay ! flvmux streamable=true ! rtmpsink sync=false name=sink'.format(uri)
         )
 
 

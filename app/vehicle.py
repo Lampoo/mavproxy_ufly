@@ -267,12 +267,14 @@ class TrackInfoFactGroup(FactGroup):
     TopicFactName = 'Topic'
     DroneSerialNoFactName = 'DroneSerialNo'
     FlightTypeFactName = 'FlightType'
+    CameraTypeFactName = 'CameraType'
 
-    def __init__(self, serialNum, flightType):
+    def __init__(self, serialNum, flightType, cameraType):
         super(TrackInfoFactGroup, self).__init__(None)
         self.set_default(TrackInfoFactGroup.TopicFactName, 'TRACK')
         self.set_default(TrackInfoFactGroup.DroneSerialNoFactName, serialNum)
         self.set_default(TrackInfoFactGroup.FlightTypeFactName, flightType)
+        self.set_default(TrackInfoFactGroup.CameraTypeFactName, cameraType)
 
 class VehicleFactGroup(FactGroup):
     LatFactName = 'Latitude'
@@ -333,7 +335,7 @@ class VehicleFactGroup(FactGroup):
 
 
 class Vehicle(object):
-    def __init__(self, sysid, compid, serialNum, flightType):
+    def __init__(self, sysid, compid, serialNum, flightType, cameraType):
         self.system = sysid
         self.component = compid
 
@@ -345,7 +347,7 @@ class Vehicle(object):
 
         self.vehicleFactGroup = VehicleFactGroup()
         self.fact_groups = []
-        self.fact_groups.append(TrackInfoFactGroup(serialNum, flightType))
+        self.fact_groups.append(TrackInfoFactGroup(serialNum, flightType, cameraType))
         self.fact_groups.append(GPSFactGroup())
         self.fact_groups.append(HomePositionFactGroup())
         self.fact_groups.append(RTKFactGroup())

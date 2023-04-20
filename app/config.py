@@ -62,6 +62,9 @@ class Configuration(object):
                     self.SUBSCRIBE_TOPIC = str(_conf.get('subscribe', 'topic'))
                     self.SUBSCRIBE_QOS = _conf.get('subscribe', 'qos')
 
+                    self.CAMERA_TYPE = str(_conf.get('camera', 'type'))
+                    self.STREAM_SRC = str(_conf.get('camera', 'source'))
+
                     self.APP_DEBUG = parse_bool(_conf.get('debug', 'app_debug'))
                     self.MODULE_DEBUG = parse_bool(_conf.get('debug', 'module_debug'))
 

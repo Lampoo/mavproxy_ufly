@@ -6,6 +6,7 @@ import pprint
 from vehicle import Vehicle
 from config import Configuration
 from mqtt import MqttHandler
+from rtmp import GSTPipeline
 
 from optparse import OptionParser
 from pymavlink import mavutil
@@ -18,7 +19,7 @@ class Application(object):
         if self.config.APP_DEBUG:
             pprint.pprint(vars(self.config))
 
-        self.vehicle = Vehicle(self.opts.target_system, self.opts.target_component, self.config.SERIAL_NUM, self.config.FLIGHT_TYPE)
+        self.vehicle = Vehicle(self.opts.target_system, self.opts.target_component, self.config.SERIAL_NUM, self.config.FLIGHT_TYPE, self.config.CAMERA_TYPE)
         self.stream_rate = self.opts.stream_rate
         self.last_timestamp = time.monotonic()
 
@@ -26,6 +27,7 @@ class Application(object):
         signal.signal(signal.SIGTERM, self.exit_gracefully)
 
         self.message_queue = queue.Queue(maxsize=10)
+        self.stream_thread = None
 
         # create MAVLink link
 
@@ -60,12 +62,28 @@ class Application(object):
         '''unload data that has been placed on the message queue by the client'''
         while not self.message_queue.empty():
             try:
-                data = self.message_queue.get_nowait()
+                message = self.message_queue.get_nowait()
             except queue.Empty:
                 return
+
+            uav_serial_num = message.get('UAVSerialNum')
+            if uav_serial_num == self.config.SERIAL_NUM:
+                self.handle_ufly_msg(message)
+
+    def handle_ufly_msg(self, message):
+        type = message.get('Type')
+        streamUrl = message.get('StreamUrl')
+        if type is not None and streamUrl is not None:
+            if type == 1:
+                if self.stream_thread is None:
+                    self.stream_thread = GSTPipeline.from_uri(self.config.STREAM_SRC)
+                    if self.stream_thread is not None:
+                        self.stream_thread.set_location(streamUrl)
+                        self.stream_thread.start()
             else:
-                # TODO: handle the user feedback
-                pass
+                if self.stream_thread is not None:
+                    self.stream_thread.stop()
+                    self.stream_thread = None
 
     def process_mavlink(self, timeout=0.01):
         '''receive MAVLink messages'''
@@ -85,7 +103,7 @@ class Application(object):
         except select.error:
             pass
 
-    def handle_msg(self, conn, msg):
+    def handle_mavlink_msg(self, conn, msg):
         '''callback for received MAVLink messages'''
         type = msg.get_type()
         sysid = msg.get_srcSystem()
@@ -106,7 +124,7 @@ class Application(object):
         self.mqtt_handler.connect()
 
     def main_loop(self):
-        self.mavlink.message_hooks.append(self.handle_msg)
+        self.mavlink.message_hooks.append(self.handle_mavlink_msg)
 
         while not self.exit:
             self.process_mavlink(timeout=0.01)
