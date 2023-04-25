@@ -233,16 +233,16 @@ class AttitudeFactGroup(FactGroup):
 
 
 class BatteryFactGroup(FactGroup):
-    PercentRemainingFactName = 'BatteryPercent'
     VoltageFactName = 'BatteryVoltage'
+    VoltagePercentFactName = 'VoltagePercent'
 
     def __init__(self):
         super(BatteryFactGroup, self).__init__(None)
-        self.set_default(BatteryFactGroup.PercentRemainingFactName)
+        self.set_default(BatteryFactGroup.VoltagePercentFactName)
         self.set_default(BatteryFactGroup.VoltageFactName)
 
     def is_valid(self):
-        if self.get(BatteryFactGroup.PercentRemainingFactName) is not None:
+        if self.get(BatteryFactGroup.VoltagePercentFactName) is not None:
             return True
         else:
             return False
@@ -256,7 +256,7 @@ class BatteryFactGroup(FactGroup):
         return False
 
     def handle_sys_status(self, conn, msg):
-        self.set(BatteryFactGroup.PercentRemainingFactName, msg.battery_remaining)
+        self.set(BatteryFactGroup.VoltagePercentFactName, msg.battery_remaining)
         self.set(BatteryFactGroup.VoltageFactName, msg.voltage_battery / 1000.0)
 
     def handle_battery_status(self, conn, msg):
