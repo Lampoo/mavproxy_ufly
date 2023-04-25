@@ -28,25 +28,26 @@ class Application(object):
 
         self.message_queue = queue.Queue(maxsize=10)
         self.stream_thread = None
-
-        # create MAVLink link
+        self.exit = False
 
         if self.config.MAVLINK_CONNECTION is not None:
             connection = self.config.MAVLINK_CONNECTION
         else:
             connection = self.opts.connection
 
-        try:
-            self.mavlink = mavutil.mavlink_connection(connection)
-            if self.config.APP_DEBUG:
-                print("MAVLINK %s" % (connection))
-        except Exception as err:
-            print("Failed to connect to %s: %s" % (connection, err))
-            sys.exit(1)
+        # create MAVLink link
+        while not self.exit:
+            try:
+                self.mavlink = mavutil.mavlink_connection(connection)
+                if self.config.APP_DEBUG:
+                    print("MAVLINK %s" % (connection))
+                break
+            except Exception as err:
+                print("Failed to connect to %s: %s" % (connection, err))
+                time.sleep(0.1)
 
         self.mqtt_handler = MqttHandler(self.config, self.callback)
 
-        self.exit = False
         self.main_loop()
 
         self.mqtt_handler.stop()
