@@ -344,6 +344,7 @@ class Vehicle(object):
         self.landed_state = -1
 
         self.executor = ThreadPoolExecutor(max_workers=5)
+        self.on_image_downloaded = None
 
         self.vehicleFactGroup = VehicleFactGroup()
         self.fact_groups = []
@@ -439,14 +440,19 @@ class Vehicle(object):
 
         self.vehicleFactGroup.set_land_mode(landMode)
 
-    def download(self, file_url, fn, *args, **kwargs):
+    def image_download(self, file_url):
         if file_url.startswith('http'):
             r = requests.get(file_url)
             if r.status_code == requests.codes.ok:
-                fn(0, r.content, args, kwargs)
+                if 'Content-Disposition' in r.headers and r.headers['Content-Disposition']:
+                    contentDisposition = r.headers['Content-Disposition']
+                    filename = contentDisposition.split('filename=')[1]
+                else:
+                    filename = os.path.basename(file_url)
+                if self.on_image_downloaded is not None:
+                    self.on_image_downloaded(filename, r.content)
             else:
-                fn(1, r.content, args, kwargs)
-
+                print("Failed to download %s" % file_url)
 
     def handle_camera_image_captured(self, conn, msg):
         file_url = msg.file_url
@@ -455,12 +461,8 @@ class Vehicle(object):
             #lat = msg.lat / 1.0e7
             #lon = msg.lon / 1.0e7
             #alt = msg.alt / 1000.0
-            if file_url is not None and file_url.startswith("http"):
-                self.execute(self.download, file_url)
-
-
-    def execute(self, fn, *args, **kwargs):
-        self.executor.submit(fn, args, kwargs)
+            if file_url:
+                self.executor.submit(self.image_download, file_url)
 
     def telemetry(self):
         data = {}

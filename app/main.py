@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-import sys, os, signal, queue, select, time, json, math
+import sys, os, signal, queue, select, time, json, math, requests
 import pprint
 
 from vehicle import Vehicle
@@ -20,6 +20,7 @@ class Application(object):
             pprint.pprint(vars(self.config))
 
         self.vehicle = Vehicle(self.opts.target_system, self.opts.target_component, self.config.SERIAL_NUM, self.config.FLIGHT_TYPE, self.config.CAMERA_TYPE)
+        self.vehicle.on_image_downloaded = self.on_image_downloaded
         self.stream_rate = self.opts.stream_rate
         self.last_timestamp = time.monotonic()
 
@@ -114,6 +115,16 @@ class Application(object):
             return
 
         self.vehicle.handle_msg(conn, msg)
+
+    def on_image_downloaded(self, filename, content):
+        url = 'http://58.210.75.102:17002/common/File/UploadFileWithoutSecret'
+        data = { 'file': filename, 'fileCategoryID': 376 }
+        r = requests.post(url, data=data, files=BytesIO(content))
+        if r.status_code == requests.status_codes.codes.ok:
+            reply = r.json()
+            if 'code' in reply and reply['code'] == 200 and 'data' in reply:
+                data = { "requestData": { "data": { "FileInfoldList": [reply['data']], "PhotoVariety": 1 } }, "sign": "" }
+                requests.post('http://58.210.75.102:17002/api/SNDefect/uploadSNFileinfo', data=data)
 
     def update(self):
         now = time.monotonic()
