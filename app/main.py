@@ -116,15 +116,38 @@ class Application(object):
 
         self.vehicle.handle_msg(conn, msg)
 
-    def on_image_downloaded(self, filename, content):
+    def on_image_downloaded(filename, content):
+        print("Uploading %s" % filename)
         url = 'http://58.210.75.102:17002/common/File/UploadFileWithoutSecret'
-        data = { 'file': filename, 'fileCategoryID': 376 }
-        r = requests.post(url, data=data, files=BytesIO(content))
-        if r.status_code == requests.status_codes.codes.ok:
-            reply = r.json()
-            if 'code' in reply and reply['code'] == 200 and 'data' in reply:
-                data = { "requestData": { "data": { "FileInfoldList": [reply['data']], "PhotoVariety": 1 } }, "sign": "" }
-                requests.post('http://58.210.75.102:17002/api/SNDefect/uploadSNFileinfo', data=data)
+        data = {'fileCategoryID': 376}
+        files = {'file': content}
+        try:
+            r = requests.post(url, data=data, files=files)
+        except requests.exceptions.ConnectTimeout:
+            print("Abort: Connection Timeout")
+            return
+        except Exception as ee:
+            print(ee)
+            return
+
+        if r.status_code != requests.status_codes.codes.ok:
+            print("Abort: Status code %d" % r.status_code)
+            return
+
+        reply = r.json()
+        if 'code' in reply and reply['code'] != 200:
+            print("Abort: Reply code %d" % reply['code'])
+            return
+
+        if 'data' in reply:
+            data = {"requestData": {"data": {"FileInfoldList": [reply['data']], "PhotoVariety": 1}}, "sign": ""}
+            print("uploadSNFileinfo")
+            try:
+                requests.post('http://58.210.75.102:17002/api/SNDefect/uploadSNFileinfo', json=data)
+            except requests.exceptions.ConnectTimeout:
+                print("Abort: Connection Timeout")
+            except Exception as ee:
+                print(ee)
 
     def update(self):
         now = time.monotonic()

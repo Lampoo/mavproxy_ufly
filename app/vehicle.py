@@ -1,4 +1,4 @@
-import sys, os, signal, queue, select, time, json, math
+import sys, os, signal, queue, select, time, json, math, requests
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pymavlink import mavutil
@@ -374,7 +374,7 @@ class Vehicle(object):
                     self.handle_sys_status(conn, msg)
                 else:
                     return False
-            elif self.component >= mavutil.mavlink.MAV_COMP_ID_CAMERA and self.component <= mavutil.mavlink.MAV_COMP_ID_CAMERA6:
+            elif compid >= mavutil.mavlink.MAV_COMP_ID_CAMERA and compid <= mavutil.mavlink.MAV_COMP_ID_CAMERA6:
                 # FIXME: Should be done in the CameraManager class
                 if type == 'CAMERA_IMAGE_CAPTURED':
                     self.handle_camera_image_captured(conn, msg)
@@ -442,17 +442,28 @@ class Vehicle(object):
 
     def image_download(self, file_url):
         if file_url.startswith('http'):
-            r = requests.get(file_url)
-            if r.status_code == requests.codes.ok:
-                if 'Content-Disposition' in r.headers and r.headers['Content-Disposition']:
-                    contentDisposition = r.headers['Content-Disposition']
-                    filename = contentDisposition.split('filename=')[1]
-                else:
-                    filename = os.path.basename(file_url)
-                if self.on_image_downloaded is not None:
-                    self.on_image_downloaded(filename, r.content)
+            print("Image captured at %s" % file_url)
+            try:
+                r = requests.get(file_url)
+            except requests.exceptions.ConnectTimeout:
+                print("Abort: Connection Timeout")
+                return
+            except Exception as ee:
+                print(ee)
+                return
+
+            if r.status_code != requests.codes.ok:
+                print("Abort: status code %d" % r.status_code)
+                return
+
+            if 'Content-Disposition' in r.headers and r.headers['Content-Disposition']:
+                contentDisposition = r.headers['Content-Disposition']
+                filename = contentDisposition.split('filename=')[1]
             else:
-                print("Failed to download %s" % file_url)
+                filename = os.path.basename(file_url)
+
+            if self.on_image_downloaded is not None:
+                self.on_image_downloaded(filename, r.content)
 
     def handle_camera_image_captured(self, conn, msg):
         file_url = msg.file_url
